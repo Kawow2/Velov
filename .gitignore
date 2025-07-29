@@ -13,3 +13,18 @@ pnpm-debug.log*
 # Mac / VSCode junk files
 .DS_Store
 .vscode/
+
+# Environnements virtuels
+venv/
+.env
+
+# Python cache/compiled
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# VSCode / PyCharm
+.vscode/
+.idea/
+
