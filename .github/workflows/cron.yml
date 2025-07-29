@@ -1,0 +1,27 @@
+name: Velov Cron
+
+on:
+  schedule:
+    - cron: "*/5 * * * *" # toutes les 5 minutes
+  workflow_dispatch: # permet aussi de lancer manuellement
+
+jobs:
+  run-script:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "20"
+
+      - name: Installer les dépendances
+        run: npm install
+
+      - name: Exécuter le script Velov
+        run: node velov-cron.js
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
