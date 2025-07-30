@@ -21,6 +21,7 @@ app = FastAPI(title="Velov API")
 origins = [
     "http://localhost:5173",
     "https://velov-kawows-projects.vercel.app",
+    "https://velov-mu.vercel.app"
 ]
 
 # Ajoute ce bloc :
