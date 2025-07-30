@@ -15,9 +15,11 @@
   let endDate = "";
 
   async function loadData() {
+    const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
+
     const [stationsRes, statusRes] = await Promise.all([
-      fetch("http://127.0.0.1:8000/stations"),
-      fetch("http://127.0.0.1:8000/status/latest"),
+      fetch(`${API_BASE}/stations`),
+      fetch(`${API_BASE}/status/latest`),
     ]);
 
     const stations = await stationsRes.json();
