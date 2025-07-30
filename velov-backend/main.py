@@ -48,14 +48,26 @@ def get_stations():
     response = supabase.table("stations").select("*").execute()
     return response.data
 
+@app.get("/status/{station_id}")
+def get_station_history(
+    station_id: str,
+    start: datetime = Query(None),
+    end: datetime = Query(None)
+):
+    query = supabase.table("station_status_logs").select("*").eq("station_id", station_id)
+    if start:
+        query = query.gte("timestamp", start.isoformat())
+    if end:
+        query = query.lte("timestamp", end.isoformat())
+    response = query.order("timestamp", desc=False).execute()
+    return response.data
+
 
 @app.get("/status/latest")
 def get_latest_status():
-    """
-    Retourne le dernier statut connu de toutes les stations.
-    """
     response = supabase.table("latest_station_status").select("*").execute()
     return response.data
+
 
 
 
