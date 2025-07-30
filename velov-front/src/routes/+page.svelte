@@ -97,7 +97,7 @@
     }
 
     // Met à jour le graphique
-    updateChart();
+    updateAllCharts();
   }
 
   function updateSearchResults() {
@@ -166,37 +166,175 @@
       });
     });
   });
+
+  let hoursChart: Chart | null = null;
+  let donutChart: Chart | null = null;
+  let volatilityEvents: any[] = [];
+
+  async function updateAllCharts() {
+    if (!selectedStation) return;
+
+    const data = await loadHistory(selectedStation.station_id);
+    if (!data || data.length === 0) return;
+
+    updateHistoryChart(data);
+    updateHoursChart(data);
+    updateDonutChart(data);
+    computeVolatility(data);
+  }
+
+  function updateHistoryChart(data: any[]) {
+    const labels = data.map((d: any) =>
+      new Date(d.timestamp).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    );
+    const bikes = data.map((d: any) => d.num_bikes_available);
+    const docks = data.map((d: any) => d.num_docks_available);
+
+    const ctx = (
+      document.getElementById("historyChart") as HTMLCanvasElement
+    ).getContext("2d");
+    if (chart) chart.destroy();
+    chart = new Chart(ctx!, {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          {
+            label: "Vélos",
+            data: bikes,
+            borderColor: "green",
+            backgroundColor: "rgba(0,255,0,0.1)",
+          },
+          {
+            label: "Places libres",
+            data: docks,
+            borderColor: "red",
+            backgroundColor: "rgba(255,0,0,0.1)",
+          },
+        ],
+      },
+      options: { responsive: true, maintainAspectRatio: false },
+    });
+  }
+
+  function updateHoursChart(data: any[]) {
+    const hours = Array(24)
+      .fill(0)
+      .map((_, h) => {
+        const subset = data.filter(
+          (d) => new Date(d.timestamp).getHours() === h
+        );
+        if (subset.length === 0) return 0;
+        const avg =
+          subset.reduce((acc, d) => acc + d.num_bikes_available, 0) /
+          subset.length;
+        return avg;
+      });
+
+    const ctx = (
+      document.getElementById("hoursChart") as HTMLCanvasElement
+    ).getContext("2d");
+    if (hoursChart) hoursChart.destroy();
+    hoursChart = new Chart(ctx!, {
+      type: "bar",
+      data: {
+        labels: Array.from({ length: 24 }, (_, i) => `${i}h`),
+        datasets: [
+          {
+            label: "Moyenne vélos / heure",
+            data: hours,
+            backgroundColor: "rgba(0,0,255,0.5)",
+          },
+        ],
+      },
+      options: { responsive: true, maintainAspectRatio: false },
+    });
+  }
+
+  function updateDonutChart(data: any[]) {
+    const avgBikes =
+      data.reduce((acc, d) => acc + d.num_bikes_available, 0) / data.length;
+    const capacity =
+      data[0]?.capacity ||
+      avgBikes +
+        data.reduce((acc, d) => acc + d.num_docks_available, 0) / data.length;
+    const avgDocks = capacity - avgBikes;
+
+    const ctx = (
+      document.getElementById("donutChart") as HTMLCanvasElement
+    ).getContext("2d");
+    if (donutChart) donutChart.destroy();
+    donutChart = new Chart(ctx!, {
+      type: "doughnut",
+      data: {
+        labels: ["Vélos", "Places libres"],
+        datasets: [
+          { data: [avgBikes, avgDocks], backgroundColor: ["green", "red"] },
+        ],
+      },
+      options: { responsive: true, maintainAspectRatio: false },
+    });
+  }
+
+  function computeVolatility(data: any[]) {
+    volatilityEvents = [];
+    for (let i = 1; i < data.length; i++) {
+      const diff = Math.abs(
+        data[i].num_bikes_available - data[i - 1].num_bikes_available
+      );
+      if (diff >= 5) {
+        // seuil : changement rapide >= 5
+        volatilityEvents.push({ timestamp: data[i].timestamp, delta: diff });
+      }
+    }
+  }
 </script>
 
 <div class="container">
   <!-- Colonne gauche -->
   <div class="left-panel">
-    <h2>Historique</h2>
     {#if selectedStation}
-      <div style="margin-top:10px">
-        <label>
-          Date début:
-          <input
-            type="datetime-local"
-            bind:value={startDate}
-            on:change={updateChart}
-          />
-        </label>
-        <br />
-        <label>
-          Date fin:
-          <input
-            type="datetime-local"
-            bind:value={endDate}
-            on:change={updateChart}
-          />
-        </label>
+      <div class="stats-header">
+        <h2>Statistiques</h2>
+        <div class="date-filters">
+          <label>
+            Début
+            <input
+              type="datetime-local"
+              bind:value={startDate}
+              on:change={updateAllCharts}
+            />
+          </label>
+          <label>
+            Fin
+            <input
+              type="datetime-local"
+              bind:value={endDate}
+              on:change={updateAllCharts}
+            />
+          </label>
+        </div>
       </div>
-      <div style="height: 300px; margin-top:20px;">
+
+      <div class="chart-container large">
         <canvas id="historyChart"></canvas>
       </div>
+
+      <div class="chart-container medium">
+        <canvas id="hoursChart"></canvas>
+      </div>
+
+      <div class="chart-container medium">
+        <canvas id="donutChart"></canvas>
+      </div>
     {:else}
-      <p>Sélectionne une station pour voir l'historique</p>
+      <div class="stats-placeholder">
+        <h2>Statistiques</h2>
+        <p>Sélectionnez une station pour voir les données</p>
+      </div>
     {/if}
   </div>
 
@@ -208,7 +346,7 @@
         placeholder="Rechercher une station..."
         bind:value={searchTerm}
         on:input={updateSearchResults}
-        style="width:100%; padding:5px;"
+        style="width:100%; padding:5px; width: 96%;"
       />
       {#if searchResults.length > 0}
         <div class="search-results">
@@ -224,29 +362,30 @@
   </div>
 
   <!-- Colonne droite -->
+  <!-- Colonne droite -->
   <div class="right-panel">
     {#if selectedStation}
-      <h2>{selectedStation.name}</h2>
-      {#if selectedStation.status}
+      <div class="station-info">
+        <h3>{selectedStation.name}</h3>
         <p>
           <strong>Vélos disponibles :</strong>
           {selectedStation.status.num_bikes_available}
         </p>
-
         <p>
           <strong>Places libres :</strong>
           {selectedStation.status.num_docks_available}
         </p>
         <p><strong>Capacité totale :</strong> {selectedStation.capacity}</p>
-        <p>
-          <strong>Mise à jour :</strong>
-          {new Date(selectedStation.status.timestamp).toLocaleString()}
+        <p class="update-time">
+          Mise à jour : {new Date(
+            selectedStation.status.timestamp
+          ).toLocaleString()}
         </p>
-      {:else}
-        <p>Données en cours de chargement…</p>
-      {/if}
+      </div>
     {:else}
-      <p>Sélectionne une station pour voir les détails</p>
+      <div class="station-placeholder">
+        <p>Sélectionnez une station sur la carte</p>
+      </div>
     {/if}
   </div>
 </div>
@@ -256,52 +395,123 @@
     display: flex;
     height: 100vh;
     width: 100vw;
+    overflow: hidden;
   }
 
-  .left-panel,
+  .left-panel {
+    width: 25%;
+    padding: 15px;
+    background: #fafafa;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    overflow: hidden;
+  }
+
   .right-panel {
-    width: 20%;
-    padding: 10px;
-    background: #f7f7f7;
-    overflow-y: auto;
+    width: 15%;
+    padding: 15px;
+    background: #fdfdfd;
+    border-left: 1px solid #ddd;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+  }
+
+  .station-info h3 {
+    font-size: 18px;
+    margin-bottom: 10px;
+  }
+  .station-info p {
+    font-size: 14px;
+    margin: 4px 0;
+  }
+  .update-time {
+    margin-top: 10px;
+    font-style: italic;
+    font-size: 12px;
+    color: #666;
   }
 
   .center-panel {
     width: 60%;
     position: relative;
+    display: flex;
+    flex-direction: column;
   }
 
   #map {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    flex: 1;
   }
 
-  .custom-icon {
-    cursor: pointer;
+  .stats-header {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
 
-  /* Barre de recherche */
+  .date-filters {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .date-filters label {
+    display: flex;
+    flex-direction: column;
+    font-size: 14px;
+  }
+
+  .chart-container {
+    background: white;
+    border-radius: 8px;
+    padding: 10px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    flex-shrink: 0;
+  }
+  .chart-container.large {
+    height: 250px;
+  }
+  .chart-container.medium {
+    height: 200px;
+  }
+
+  .stats-placeholder,
+  .station-placeholder {
+    text-align: center;
+    color: #777;
+    margin-top: 50%;
+  }
+
+  /* Barre de recherche améliorée */
   .search-box {
     position: absolute;
     top: 20px;
     left: 50%;
     transform: translateX(-50%);
     background: white;
-    padding: 10px;
-    border-radius: 8px;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+    padding: 8px;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
     width: 300px;
     z-index: 1000;
+  }
+
+  .search-box input {
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    outline: none;
+    font-size: 14px;
   }
 
   .search-results {
     margin-top: 5px;
     border: 1px solid #ccc;
-    border-radius: 6px;
-    max-height: 200px;
+    border-radius: 8px;
+    max-height: 250px;
     overflow-y: auto;
     background: white;
   }
@@ -312,6 +522,6 @@
   }
 
   .search-results div:hover {
-    background: #eee;
+    background: #f0f0f0;
   }
 </style>
