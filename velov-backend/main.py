@@ -1,13 +1,12 @@
 from dotenv import load_dotenv
-load_dotenv()  # charge le fichier .env automatiquement
-
 import os
 from datetime import datetime
 from fastapi import FastAPI, Query
 from supabase import create_client
+from fastapi.middleware.cors import CORSMiddleware
 
-import httpx
-# Configuration Supabase (variables chargées depuis .env)
+load_dotenv()
+
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
@@ -18,12 +17,21 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 app = FastAPI(title="Velov API")
 
-from fastapi.middleware.cors import CORSMiddleware
-
+# CORS : liste des origines autorisées
 origins = [
     "http://localhost:5173",
-    "https://velov-kawows-projects.vercel.app"
+    "https://velov-kawows-projects.vercel.app",
 ]
+
+# Ajoute ce bloc :
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 app.add_middleware(
     CORSMiddleware,
