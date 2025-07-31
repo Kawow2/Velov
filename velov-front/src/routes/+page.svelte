@@ -3,7 +3,6 @@
   import { Chart, registerables } from "chart.js";
   Chart.register(...registerables);
 
-  let map: any;
   let stationsData: any[] = [];
   let selectedStation: any = null;
   let searchTerm = "";
@@ -13,6 +12,80 @@
   let chart: Chart | null = null;
   let startDate = "";
   let endDate = "";
+  let showHeatmap = false;
+
+  // Pour les markers classiques
+  let markers: L.Marker[] = [];
+
+  // Pour la heatmap
+  let heatLayer: L.HeatLayer | null = null;
+
+  // Pour le slider temporel
+  let selectedHour = 8;
+
+  // Données globales
+  let historicalData: any[] = []; // Ce tableau sera rempli quand on fera le back
+
+  let map: any = null; // La carte Leaflet
+  let L: any = null; // Leaflet sera importé dynamiquement
+
+  onMount(async () => {
+    await import("leaflet/dist/leaflet.css");
+
+    const leaflet = await import("leaflet");
+    await import("leaflet.heat");
+    L = leaflet.default;
+
+    // Initialisation de la carte après import client-only
+    map = L.map("map").setView([45.75, 4.85], 13);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap contributors",
+    }).addTo(map);
+
+    stationsData = await loadData();
+
+    stationsData.forEach((s: any) => {
+      if (!s.lat || !s.lon) return;
+
+      const bikes = s.status?.num_bikes_available ?? 0;
+      const color = bikes > 2 ? "green" : "red";
+
+      const iconHtml = `
+        <div class="marker-icon" style="
+          background:${color};
+          width:20px;
+          height:20px;
+          border-radius:50%;
+          border: 2px solid white;
+          transition: transform 0.2s ease;
+        "></div>
+      `;
+
+      const icon = L.divIcon({
+        className: "custom-icon",
+        html: iconHtml,
+      });
+
+      const marker = L.marker([s.lat, s.lon], { icon }).addTo(map);
+
+      marker.on("click", () => selectStation(s));
+
+      marker.on("mouseover", () => {
+        const el = marker
+          .getElement()
+          ?.querySelector(".marker-icon") as HTMLElement;
+        if (el) el.style.transform = "scale(1.5)";
+      });
+
+      marker.on("mouseout", () => {
+        const el = marker
+          .getElement()
+          ?.querySelector(".marker-icon") as HTMLElement;
+        if (el) el.style.transform = "scale(1)";
+      });
+    });
+  });
 
   async function loadData() {
     const API_BASE = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000";
@@ -42,6 +115,18 @@
 
     const res = await fetch(url);
     return res.json();
+  }
+
+  function renderMarkers() {
+    // Supprime anciens markers
+    markers.forEach((m) => map.removeLayer(m));
+    markers = [];
+
+    stationsData.forEach((st) => {
+      const marker = L.marker([st.lat, st.lon]);
+      marker.addTo(map);
+      markers.push(marker);
+    });
   }
 
   async function updateChart() {
@@ -112,62 +197,6 @@
       .filter((s) => s.name.toLowerCase().includes(term))
       .slice(0, 5);
   }
-
-  onMount(async () => {
-    const L = await import("leaflet");
-    await import("leaflet/dist/leaflet.css");
-
-    map = L.map("map", {
-      zoomControl: true,
-    }).setView([45.7578, 4.832], 13);
-
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-    }).addTo(map);
-
-    stationsData = await loadData();
-
-    stationsData.forEach((s: any) => {
-      if (!s.lat || !s.lon) return;
-
-      const bikes = s.status?.num_bikes_available ?? 0;
-      const color = bikes > 2 ? "green" : "red";
-
-      const iconHtml = `
-        <div class="marker-icon" style="
-          background:${color};
-          width:20px;
-          height:20px;
-          border-radius:50%;
-          border: 2px solid white;
-          transition: transform 0.2s ease;
-        "></div>
-      `;
-
-      const icon = L.divIcon({
-        className: "custom-icon",
-        html: iconHtml,
-      });
-
-      const marker = L.marker([s.lat, s.lon], { icon }).addTo(map);
-
-      marker.on("click", () => selectStation(s));
-
-      marker.on("mouseover", () => {
-        const el = marker
-          .getElement()
-          ?.querySelector(".marker-icon") as HTMLElement;
-        if (el) el.style.transform = "scale(1.5)";
-      });
-
-      marker.on("mouseout", () => {
-        const el = marker
-          .getElement()
-          ?.querySelector(".marker-icon") as HTMLElement;
-        if (el) el.style.transform = "scale(1)";
-      });
-    });
-  });
 
   let hoursChart: Chart | null = null;
   let donutChart: Chart | null = null;
@@ -293,6 +322,50 @@
       }
     }
   }
+  function toggleHeatmap() {
+    showHeatmap = !showHeatmap;
+
+    if (showHeatmap) {
+      // Enlève les markers
+      markers.forEach((m) => map.removeLayer(m));
+      updateHeatmap();
+    } else {
+      // Remet les markers
+      renderMarkers();
+      if (heatLayer) {
+        map.removeLayer(heatLayer);
+      }
+    }
+  }
+
+  function updateHeatmap() {
+    const heatData = stationsData.map((st) => [
+      st.lat,
+      st.lon,
+      st.status?.num_bikes_available || 0,
+    ]);
+
+    if (heatLayer) {
+      heatLayer.setLatLngs(heatData);
+    } else {
+      heatLayer = L.heatLayer(heatData, {
+        radius: 25,
+        blur: 15,
+        maxZoom: 17,
+      }).addTo(map);
+    }
+  }
+  function updateHeatmapByHour() {
+    // On suppose que `historicalData` contient
+    // toutes les stations pour toutes les heures
+    const filtered = historicalData
+      .filter((d) => new Date(d.timestamp).getHours() === selectedHour)
+      .map((d) => [d.lat, d.lon, d.num_bikes_available]);
+
+    if (heatLayer) {
+      heatLayer.setLatLngs(filtered);
+    }
+  }
 </script>
 
 <div class="container">
@@ -360,6 +433,24 @@
         </div>
       {/if}
     </div>
+    <div class="heatmap-toggle">
+      <button on:click={toggleHeatmap}>
+        {showHeatmap ? "Vue classique" : "Vue heatmap"}
+      </button>
+    </div>
+    {#if showHeatmap}
+      <div class="time-slider">
+        <input
+          type="range"
+          min="0"
+          max="23"
+          bind:value={selectedHour}
+          on:input={updateHeatmapByHour}
+        />
+        <span>{selectedHour}:00</span>
+      </div>
+    {/if}
+
     <div id="map"></div>
   </div>
 
@@ -393,6 +484,35 @@
 </div>
 
 <style>
+  .time-slider {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: white;
+    padding: 10px;
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .heatmap-toggle {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    z-index: 1200;
+  }
+  .heatmap-toggle button {
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: none;
+    background: #333;
+    color: white;
+    cursor: pointer;
+  }
+
   .container {
     display: flex;
     height: 100vh;
